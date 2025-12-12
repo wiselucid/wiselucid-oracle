@@ -3,12 +3,22 @@ from pydantic import BaseModel
 from openai import OpenAI
 import numpy as np
 import faiss
-import os
 
-# Initialize OpenAI Client (uses OPENAI_API_KEY from Render)
+from fastapi.middleware.cors import CORSMiddleware
+
+# Inicializa cliente OpenAI (usa OPENAI_API_KEY de Render)
 client = OpenAI()
 
 app = FastAPI(title="Wise Lucid Oracle API")
+
+# ---- CORS: permite que Shopify llame a la API ----
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # luego podemos limitarlo a tu dominio
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # --------------- DATA MODEL ----------------
 
@@ -17,7 +27,7 @@ class OracleQuestion(BaseModel):
 
 # --------------- VECTOR STORE SETUP ----------------
 
-EMBED_DIM = 1536  # for text-embedding-3-small
+EMBED_DIM = 1536  # para text-embedding-3-small
 index = faiss.IndexFlatL2(EMBED_DIM)
 
 oracle_texts = [
@@ -33,7 +43,7 @@ def embed(text):
     )
     return np.array(response.data[0].embedding, dtype="float32")
 
-# Pre-compute embeddings
+# Pre-cálculo de embeddings
 oracle_vectors = [embed(t) for t in oracle_texts]
 index.add(np.array(oracle_vectors))
 
@@ -44,14 +54,14 @@ def oracle_answer(payload: OracleQuestion):
 
     q = payload.question
 
-    # Embed user question
+    # Embed de la pregunta
     q_vec = embed(q).reshape(1, -1)
 
-    # Search most similar oracle text
+    # Busca la frase más cercana
     D, I = index.search(q_vec, 1)
     selected_text = oracle_texts[I[0][0]]
 
-    # Create Wise Lucid style answer using OpenAI
+    # Respuesta estilo Wise Lucid
     completion = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
