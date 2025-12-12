@@ -5,49 +5,49 @@ from openai import OpenAI
 import numpy as np
 import faiss
 
-# Cliente de OpenAI (usa OPENAI_API_KEY de Render)
+# Cliente de OpenAI (usa la variable de entorno OPENAI_API_KEY en Render)
 client = OpenAI()
 
 app = FastAPI(title="Wise Lucid Oracle API")
 
-# ---- CORS para que Shopify u otras webs puedan llamar a la API ----
+# ---- CORS para que tu web (Shopify u otra) pueda llamar a esta API ----
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # luego podemos limitarlo a tu dominio de Shopify
+    allow_origins=["*"],   # luego podemos limitarlo a tu dominio
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --------------- DATA MODEL ----------------
+# --------------- MODELO DE DATOS ----------------
 
 class OracleQuestion(BaseModel):
     question: str
 
-# --------------- VECTOR STORE SETUP ----------------
+# --------------- VECTOR STORE / EMBEDDINGS ----------------
 
-EMBED_DIM = 1536  # para text-embedding-3-small
+EMBED_DIM = 1536  # dimensión de text-embedding-3-small
 index = faiss.IndexFlatL2(EMBED_DIM)
 
 oracle_texts = [
-    "Cada pensamiento es una puerta hacia tu conciencia.",
-    "La claridad surge cuando permites que el ruido interno descanse.",
-    "La sabiduría no se crea, se recuerda. Tú ya la llevas dentro."
+    "Each thought is a doorway into your own awareness.",
+    "Clarity appears when you allow inner noise to rest.",
+    "Wisdom is not created, it is remembered. You already carry it within."
 ]
 
 def embed(text: str) -> np.ndarray:
-    """Genera un embedding para el texto dado."""
+    """Genera un embedding para el texto dado usando OpenAI."""
     response = client.embeddings.create(
         model="text-embedding-3-small",
         input=text
     )
     return np.array(response.data[0].embedding, dtype="float32")
 
-# Pre-calculamos embeddings de las frases del oráculo
+# Pre-calculamos embeddings de las frases base del oráculo
 oracle_vectors = [embed(t) for t in oracle_texts]
 index.add(np.array(oracle_vectors))
 
-# --------------- ORACLE RESPONSE ----------------
+# --------------- ENDPOINT PRINCIPAL DEL ORÁCULO ----------------
 
 @app.post("/api/oracle")
 def oracle_answer(payload: OracleQuestion):
@@ -57,18 +57,21 @@ def oracle_answer(payload: OracleQuestion):
     # Si la pregunta viene vacía, devolvemos un mensaje amable
     if not q:
         return {
-            "oracle_message": "El oráculo necesita al menos un susurro de tu corazón para responder. Escribe algo que realmente te importe.",
+            "oracle_message": (
+                "The oracle needs at least a whisper from your heart to respond. "
+                "Write something that truly matters to you."
+            ),
             "related_phrase": None
         }
 
     # Embed de la pregunta
     q_vec = embed(q).reshape(1, -1)
 
-    # Buscar la frase más cercana
+    # Buscar la frase más cercana en el espacio vectorial
     D, I = index.search(q_vec, 1)
     selected_text = oracle_texts[I[0][0]]
 
-    # Crear respuesta estilo Wise Lucid
+    # Llamada al modelo con instrucciones de idioma
     completion = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -76,20 +79,24 @@ def oracle_answer(payload: OracleQuestion):
                 "role": "system",
                 "content": (
                     "You are the Wise Lucid Oracle. "
-                    "Your tone is poetic, soft, philosophical and compassionate. "
-                    "You do not predict the future or give commands; "
-                    "you invite reflection and help the user remember their inner wisdom. "
-                    "VERY IMPORTANT: Always respond in the SAME LANGUAGE the user writes in "
-                    "(if the question is in English, answer in English; if it's in Spanish, answer in Spanish)."
+                    "Your tone is poetic, gentle, philosophical, and compassionate. "
+                    "You never predict the future or give orders; you invite reflection "
+                    "and help the user remember their inner wisdom. "
+                    "IMPORTANT: First, detect the language of the user's question. "
+                    "Then respond ENTIRELY in that same language. "
+                    "If the user writes in English, answer only in English. "
+                    "If the user writes in Spanish, answer only in Spanish. "
+                    "Do not mix languages in a single answer. "
+                    "Keep your replies brief, clear, and emotionally supportive."
                 )
             },
             {
                 "role": "user",
                 "content": (
                     f"User question: {q}\n\n"
-                    f"Use this phrase only as inner inspiration (you DO NOT need to repeat it literally): '{selected_text}'.\n"
-                    "Answer briefly, poetically, and deeply. "
-                    "Keep the same language as the question."
+                    f"Use this phrase only as inner inspiration "
+                    f"(you DO NOT need to repeat it literally): '{selected_text}'.\n"
+                    "Answer briefly, poetically, and deeply, following the rules above."
                 )
             }
         ]
@@ -102,7 +109,7 @@ def oracle_answer(payload: OracleQuestion):
         "related_phrase": selected_text
     }
 
-# --------------- ROOT TEST ----------------
+# --------------- ENDPOINT DE PRUEBA ----------------
 
 @app.get("/")
 def home():
